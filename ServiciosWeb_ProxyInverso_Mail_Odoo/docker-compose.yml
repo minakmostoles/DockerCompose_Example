@@ -1,0 +1,167 @@
+version: '3'
+#Version 0.1
+services:
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    container_name: nginxproxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - <UbicacionDatos>/conf.d:/etc/nginx/conf.d
+      - <UbicacionDatos>/certs:/etc/nginx/certs:ro
+      - <UbicacionDatos>/vhostd:/etc/nginx/vhost.d
+      - <UbicacionDatos>/html:/usr/share/nginx/html
+      #- <UbicacionDatos>/logs:/var/log/nginx
+    labels:
+      - com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy=true 
+    network_mode: "host"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+    
+  letsencrypt:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    container_name: LetsencryptNginxProxy
+    restart: always
+    environment:
+      - NGINX_PROXY_CONTAINER=nginxproxy
+      - NGINX_DOCKER_GEN_CONTAINER=nginxproxy
+    volumes:
+      - <UbicacionDatos>/certs:/etc/nginx/certs:rw
+      - <UbicacionDatos>/vhostd:/etc/nginx/vhost.d
+      - <UbicacionDatos>/conf.d:/etc/nginx/conf.d
+      - <UbicacionDatos>/html:/usr/share/nginx/html
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      nginx:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+
+  web:
+    image: nginx:latest
+    container_name: webContainer
+    restart: always
+    volumes:
+      - <UbicacionDatosDelLaWeb>:/usr/share/nginx/html:ro
+    environment:
+      - VIRTUAL_HOST=domain.com
+      - LETSENCRYPT_HOST=domain.com
+      - LETSENCRYPT_EMAIL=mrubio@domain.com
+    expose:
+      - "80"
+    restart: always
+    depends_on: 
+      - nginx-proxy
+    networks:
+      nginx:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+    
+  mail:
+    image: analogic/poste.io:latest
+    container_name: mail
+    restart: always
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - <UbicacionDatos>/html/.well-known:/opt/www/.well-known
+      - <UbicacionDatos>/local.cf:/etc/spamassassin/local.cf
+      - <UbicacionDatos>/data:/data
+    ports:
+      - "25:25"
+      - "110:110"
+      - "143:143"
+      - "587:587"
+      - "993:993"
+    expose:
+      - "80"
+      - "443"      
+    environment:  
+      - LETSENCRYPT_EMAIL=mrubio@domain.com
+      - LETSENCRYPT_HOST=subdomain.domain.com
+      - VIRTUAL_HOST=subdomain.domain.com
+      - HTTPS=OFF
+      - PHP_UPLOAD_MAX_FILESIZE=10M
+      - PHP_POST_MAX_SIZE=10M
+    depends_on: 
+      - nginx-proxy
+    networks:
+      nginx:
+
+  odooServer:
+    image: odoo:latest
+    container_name: "odooServer"
+    depends_on:
+      - nginx-proxy
+      - odooBD
+    ports:
+      - "8069:8069"
+    expose:
+      - "8069"
+    environment:
+      - /etc/localtime:/etc/localtime:ro
+      - VIRTUAL_HOST=subdomain.domain.com
+      - VIRTUAL_PORT=8069
+      - LETSENCRYPT_HOST=subdomain.domain.com
+      - LETSENCRYPT_EMAIL=mrubio@domail.com
+      - HTTPS=OFF
+      - db_host=odooBD
+      - db_port=5432
+      - db_user=Odoo
+      - db_password=Test
+    volumes:
+      - <UbicacionDatosDelLaWeb>:/var/lib/odoo
+      - <UbicacionDatosDelLaWeb>:/etc/odoo
+      - <UbicacionDatosDelLaWeb>:/mnt/extra-addons
+    links:
+      - odooBD
+    restart: always
+    networks:
+      nginx:
+#        ipv4_address: 172.22.0.10
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        
+  odooBD:
+    image: postgres:10
+    container_name: "odooBD"
+    depends_on:
+      - nginx-proxy
+    ports:
+      - 54320:54320
+      - 5432:5432
+    environment:
+      - /etc/localtime:/etc/localtime:ro
+      - POSTGRES_DB=Odoo_Damel
+      - POSTGRES_USER=Odoo_Damel
+      - POSTGRES_PASSWORD=Test_Damel
+      - PGDATA=/var/lib/postgresql/data/db-files/
+      #docker exec odooServer bash TEST -i base -d TEST --stop-after-init --db_host=odooBD -r TEST -w odooServer
+      #docker-compose exec odooServer bash odoo -i base -d TEST --stop-after-init --db_host = odooBD -r TEST -cw TEST
+    volumes:
+      - <UbicacionDatosDelLaWeb>:/var/lib/postgresql/data/pgdata
+      - odoo-db-data:/var/lib/postgresql/data/pgdata
+    restart: always
+    networks:
+      nginx:
+#        ipv4_address: 172.22.0.11
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+
+networks:
+  nginx:
+    external: true
+    
+volumes:
+  odoo-db-data:
